@@ -213,15 +213,25 @@ X-API-Key: demo
 
 # Example Requests
 
+## Create Business
+
+```bash
+curl -X POST http://localhost:3000/businesses \
+-H "Content-Type: application/json" \
+-d '{
+  "name": "Acme Inc"
+}'
+```
+
 ## Create Customer
 
 ```bash
-curl -H "X-API-Key: demo" \
--X POST http://localhost:3000/customers \
+curl -X POST http://localhost:3000/customers \
+-H "X-API-Key: <YOUR_API_KEY>" \
 -H "Content-Type: application/json" \
 -d '{
-  "name":"Gopi",
-  "email":"gopi@test.com"
+  "name":"John Doe",
+  "email":"john@example.com"
 }'
 ```
 
