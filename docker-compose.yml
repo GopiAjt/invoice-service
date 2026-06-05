@@ -1,0 +1,26 @@
+version: "3.9"
+
+services:
+  postgres:
+    image: postgres:16
+    environment:
+      POSTGRES_USER: dodo
+      POSTGRES_PASSWORD: dodo
+      POSTGRES_DB: invoice_db
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+
+  app:
+    build: .
+    depends_on:
+      - postgres
+    environment:
+      DATABASE_URL: postgres://dodo:dodo@postgres:5432/invoice_db
+      RUST_LOG: info
+    ports:
+      - "3000:3000"
+
+volumes:
+  postgres_data:
