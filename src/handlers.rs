@@ -1,6 +1,6 @@
 use axum::{
     Json,
-    extract::{Path, Query, State},
+    extract::{Request,Path, Query, State},
     http::StatusCode,
 };
 
@@ -19,8 +19,10 @@ use crate::{
 
 pub async fn create_webhook(
     State(state): State<AppState>,
+    Extension(business_id): Extension<Uuid>,
     Json(payload): Json<CreateWebhookRequest>,
-) -> Result<(StatusCode, Json<WebhookResponse>), StatusCode> {
+) -> Result<(StatusCode, Json<WebhookResponse>), StatusCode>
+{
     let webhook_id = Uuid::new_v4();
 
     sqlx::query(
@@ -32,18 +34,15 @@ pub async fn create_webhook(
             secret
         )
         VALUES ($1,$2,$3,$4)
-        "#,
+        "#
     )
     .bind(webhook_id)
-    .bind(Uuid::nil()) // Demo Business
+    .bind(business_id)
     .bind(&payload.url)
     .bind(&payload.secret)
     .execute(&state.db)
     .await
-    .map_err(|e| {
-        println!("WEBHOOK INSERT ERROR {:?}", e);
-        StatusCode::INTERNAL_SERVER_ERROR
-    })?;
+    .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
 
     Ok((
         StatusCode::CREATED,
@@ -163,6 +162,12 @@ pub async fn pay_invoice(
     let invoice_state = invoice.0;
     let amount_cents = invoice.1;
 
+    println!(
+        "Invoice {} locked. Current state={}",
+        invoice_id,
+        invoice_state
+    );
+
     if invoice_state == "paid" {
         return Ok(Json(PayInvoiceResponse {
             invoice_id,
@@ -247,7 +252,7 @@ pub async fn pay_invoice(
         .await
         .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
     }
-
+    println!("COMMIT invoice={}", invoice_id);
     tx.commit()
         .await
         .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;

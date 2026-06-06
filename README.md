@@ -118,7 +118,7 @@ cd invoice-service
 ## 2. Start PostgreSQL
 
 ```bash
-docker compose up -d
+docker compose up -d postgres
 ```
 
 ## 3. Run Migrations
@@ -223,11 +223,13 @@ curl -X POST http://localhost:3000/businesses \
 }'
 ```
 
+"api_key":"58a3f22a-db61-4992-ab03-825e9952e961"
+
 ## Create Customer
 
 ```bash
 curl -X POST http://localhost:3000/customers \
--H "X-API-Key: <YOUR_API_KEY>" \
+-H "X-API-Key: 58a3f22a-db61-4992-ab03-825e9952e961" \
 -H "Content-Type: application/json" \
 -d '{
   "name":"John Doe",
@@ -235,16 +237,16 @@ curl -X POST http://localhost:3000/customers \
 }'
 ```
 
----
+"id":"1e631626-06c9-4e9d-8539-224a757a3e64"
 
 ## Create Invoice
 
 ```bash
-curl -H "X-API-Key: demo" \
+curl -H "X-API-Key: 58a3f22a-db61-4992-ab03-825e9952e961" \
 -X POST http://localhost:3000/invoices \
 -H "Content-Type: application/json" \
 -d '{
-  "customer_id":"<customer-id>",
+  "customer_id":"1e631626-06c9-4e9d-8539-224a757a3e64",
   "line_items":[
     {
       "description":"Laptop",
@@ -255,17 +257,39 @@ curl -H "X-API-Key: demo" \
 }'
 ```
 
+## Create a webhook
+
+```bash
+curl -X POST http://localhost:3000/webhooks \
+-H "X-API-Key: 58a3f22a-db61-4992-ab03-825e9952e961" \
+-H "Content-Type: application/json" \
+-d '{
+  "url":"https://webhook.site/your-id",
+  "secret":"test-secret"
+}'
+```
+
 ---
 
 ## Pay Invoice
 
 ```bash
-curl -H "X-API-Key: demo" \
--X POST http://localhost:3000/invoices/<invoice-id>/pay \
+curl -H "X-API-Key: 58a3f22a-db61-4992-ab03-825e9952e961" \
+-X POST http://localhost:3000/invoices/7e5befd3-178d-4b30-812b-3a57162715ed/pay \
 -H "Content-Type: application/json" \
 -d '{
   "idempotency_key":"payment-001",
   "card_token":"tok_success"
+}'
+```
+
+```bash
+curl -H "X-API-Key: 58a3f22a-db61-4992-ab03-825e9952e961" \
+-X POST http://localhost:3000/invoices/7e5befd3-178d-4b30-812b-3a57162715ed/pay \
+-H "Content-Type: application/json" \
+-d '{
+  "idempotency_key": "payment-002",
+  "card_token": "tok_card_declined"
 }'
 ```
 

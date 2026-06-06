@@ -7,9 +7,9 @@ async fn psp_failure_keeps_invoice_open() {
 
     let invoice = client
         .post("http://localhost:3000/invoices")
-        .header("X-API-Key", "demo")
+        .header("X-API-Key", "58a3f22a-db61-4992-ab03-825e9952e961")
         .json(&json!({
-            "customer_id":"3dfba3dc-ab11-46ae-90eb-2096958de488",
+            "customer_id":"1e631626-06c9-4e9d-8539-224a757a3e64",
             "line_items":[
                 {
                     "description":"PSP Failure Test",
@@ -29,7 +29,7 @@ async fn psp_failure_keeps_invoice_open() {
 
     let payment = client
         .post(format!("http://localhost:3000/invoices/{}/pay", invoice_id))
-        .header("X-API-Key", "demo")
+        .header("X-API-Key", "58a3f22a-db61-4992-ab03-825e9952e961")
         .json(&json!({
             "idempotency_key":"psp-failure-001",
             "card_token":"tok_card_declined"
@@ -45,7 +45,7 @@ async fn psp_failure_keeps_invoice_open() {
 
     let invoice_after = client
         .get(format!("http://localhost:3000/invoices/{}", invoice_id))
-        .header("X-API-Key", "demo")
+        .header("X-API-Key", "58a3f22a-db61-4992-ab03-825e9952e961")
         .send()
         .await
         .unwrap()

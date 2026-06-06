@@ -7,9 +7,9 @@ async fn concurrent_payment_requests() {
 
     let invoice = client
         .post("http://localhost:3000/invoices")
-        .header("X-API-Key", "demo")
+        .header("X-API-Key", "58a3f22a-db61-4992-ab03-825e9952e961")
         .json(&json!({
-            "customer_id":"3dfba3dc-ab11-46ae-90eb-2096958de488",
+            "customer_id":"1e631626-06c9-4e9d-8539-224a757a3e64",
             "line_items":[
                 {
                     "description":"Concurrency Test",
@@ -41,13 +41,13 @@ async fn concurrent_payment_requests() {
 
     let req1 = client
         .post(&url)
-        .header("X-API-Key", "demo")
+        .header("X-API-Key", "58a3f22a-db61-4992-ab03-825e9952e961")
         .json(&payload1)
         .send();
 
     let req2 = client
         .post(&url)
-        .header("X-API-Key", "demo")
+        .header("X-API-Key", "58a3f22a-db61-4992-ab03-825e9952e961")
         .json(&payload2)
         .send();
 
