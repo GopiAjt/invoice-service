@@ -28,14 +28,15 @@ async fn concurrent_payment_requests() {
     let invoice_id = invoice["id"].as_str().unwrap();
 
     let url = format!("http://localhost:3000/invoices/{}/pay", invoice_id);
-
+    let key1 = format!("concurrent-{}", uuid::Uuid::new_v4());
+    let key2 = format!("concurrent-{}", uuid::Uuid::new_v4());
     let payload1 = json!({
-        "idempotency_key":"concurrent-1",
+        "idempotency_key":key1,
         "card_token":"tok_success"
     });
 
     let payload2 = json!({
-        "idempotency_key":"concurrent-2",
+        "idempotency_key":key2,
         "card_token":"tok_success"
     });
 

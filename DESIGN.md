@@ -152,7 +152,7 @@ Key guarantees:
 
 # 6. What was NOT built
 
-- requied state machine for invoice lifecycle
+- proper state machine for invoice lifecycle
 - Refund system
 - Kafka/event streaming
 - Partial payments

@@ -1,6 +1,6 @@
 use axum::{
     Json,
-    extract::{Request,Path, Query, State},
+    extract::{Path, Query, State},
     http::StatusCode,
 };
 
@@ -109,11 +109,16 @@ pub async fn pay_invoice(
     Path(invoice_id): Path<Uuid>,
     Json(payload): Json<PayInvoiceRequest>,
 ) -> Result<Json<PayInvoiceResponse>, StatusCode> {
-    println!("POST /invoices/{}/pay", invoice_id);
+    println!("\n==============================");
+    println!("PAY REQUEST START");
+    println!("invoice_id={}", invoice_id);
+    println!("idempotency_key={}", payload.idempotency_key);
 
     // --------------------------------------------------
     // IDEMPOTENCY CHECK
     // --------------------------------------------------
+
+    println!("Checking idempotency...");
 
     let existing = sqlx::query_as::<_, (String, Option<String>)>(
         r#"
@@ -126,9 +131,17 @@ pub async fn pay_invoice(
     .bind(&payload.idempotency_key)
     .fetch_optional(&state.db)
     .await
-    .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+    .map_err(|e| {
+        println!("IDEMPOTENCY CHECK ERROR: {:?}", e);
+        StatusCode::INTERNAL_SERVER_ERROR
+    })?;
 
     if let Some((status, psp_ref)) = existing {
+        println!(
+            "IDEMPOTENCY HIT -> status={}, psp_ref={:?}",
+            status, psp_ref
+        );
+
         return Ok(Json(PayInvoiceResponse {
             invoice_id,
             status,
@@ -136,15 +149,28 @@ pub async fn pay_invoice(
         }));
     }
 
+    println!("No existing payment attempt");
+
     // --------------------------------------------------
     // START TRANSACTION
     // --------------------------------------------------
+
+    println!("BEGIN TRANSACTION");
 
     let mut tx = state
         .db
         .begin()
         .await
-        .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+        .map_err(|e| {
+            println!("BEGIN TX ERROR: {:?}", e);
+            StatusCode::INTERNAL_SERVER_ERROR
+        })?;
+
+    // --------------------------------------------------
+    // LOCK INVOICE
+    // --------------------------------------------------
+
+    println!("BEFORE LOCK invoice={}", invoice_id);
 
     let invoice = sqlx::query_as::<_, (String, i64)>(
         r#"
@@ -157,18 +183,24 @@ pub async fn pay_invoice(
     .bind(invoice_id)
     .fetch_one(&mut *tx)
     .await
-    .map_err(|_| StatusCode::NOT_FOUND)?;
+    .map_err(|e| {
+        println!("LOCK ERROR: {:?}", e);
+        StatusCode::NOT_FOUND
+    })?;
 
     let invoice_state = invoice.0;
     let amount_cents = invoice.1;
 
     println!(
-        "Invoice {} locked. Current state={}",
+        "AFTER LOCK invoice={} state={} amount={}",
         invoice_id,
-        invoice_state
+        invoice_state,
+        amount_cents
     );
 
     if invoice_state == "paid" {
+        println!("Invoice already paid");
+
         return Ok(Json(PayInvoiceResponse {
             invoice_id,
             status: "already_paid".to_string(),
@@ -177,8 +209,14 @@ pub async fn pay_invoice(
     }
 
     // --------------------------------------------------
-    // CALL PSP OVER HTTP
+    // PSP CALL
     // --------------------------------------------------
+
+    println!(
+        "CALLING PSP invoice={} amount={}",
+        invoice_id,
+        amount_cents
+    );
 
     let client = reqwest::Client::new();
 
@@ -201,6 +239,13 @@ pub async fn pay_invoice(
             StatusCode::INTERNAL_SERVER_ERROR
         })?;
 
+    println!(
+        "PSP RESPONSE success={} status={} psp_ref={}",
+        psp_response.success,
+        psp_response.status,
+        psp_response.psp_ref
+    );
+
     let success = psp_response.success;
     let status = psp_response.status.clone();
 
@@ -211,10 +256,16 @@ pub async fn pay_invoice(
     };
 
     // --------------------------------------------------
-    // RECORD PAYMENT ATTEMPT
+    // INSERT PAYMENT ATTEMPT
     // --------------------------------------------------
 
-    sqlx::query(
+    println!(
+        "INSERT payment_attempt invoice={} status={}",
+        invoice_id,
+        status
+    );
+
+    let result = sqlx::query(
         r#"
         INSERT INTO payment_attempts (
             id,
@@ -232,15 +283,29 @@ pub async fn pay_invoice(
     .bind(&payload.idempotency_key)
     .bind(psp_ref.clone())
     .execute(&mut *tx)
-    .await
-    .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+    .await;
+
+    match result {
+        Ok(r) => {
+            println!(
+                "PAYMENT ATTEMPT INSERTED rows={}",
+                r.rows_affected()
+            );
+        }
+        Err(e) => {
+            println!("PAYMENT ATTEMPT INSERT ERROR: {:?}", e);
+            return Err(StatusCode::INTERNAL_SERVER_ERROR);
+        }
+    }
 
     // --------------------------------------------------
-    // MARK INVOICE PAID
+    // UPDATE INVOICE
     // --------------------------------------------------
 
     if success {
-        sqlx::query(
+        println!("UPDATING invoice={} -> paid", invoice_id);
+
+        let result = sqlx::query(
             r#"
             UPDATE invoices
             SET state='paid'
@@ -249,85 +314,45 @@ pub async fn pay_invoice(
         )
         .bind(invoice_id)
         .execute(&mut *tx)
-        .await
-        .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+        .await;
+
+        match result {
+            Ok(r) => {
+                println!(
+                    "INVOICE UPDATED rows={}",
+                    r.rows_affected()
+                );
+            }
+            Err(e) => {
+                println!("INVOICE UPDATE ERROR: {:?}", e);
+                return Err(StatusCode::INTERNAL_SERVER_ERROR);
+            }
+        }
     }
-    println!("COMMIT invoice={}", invoice_id);
+
+    // --------------------------------------------------
+    // COMMIT
+    // --------------------------------------------------
+
+    println!("COMMITTING invoice={}", invoice_id);
+
     tx.commit()
         .await
-        .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+        .map_err(|e| {
+            println!("COMMIT ERROR: {:?}", e);
+            StatusCode::INTERNAL_SERVER_ERROR
+        })?;
 
-    // --------------------------------------------------
-    // SEND WEBHOOKS + LOG DELIVERIES
-    // --------------------------------------------------
+    println!("COMMIT SUCCESS invoice={}", invoice_id);
 
-    let event_type = if success {
-        "invoice.paid"
-    } else {
-        "invoice.payment_failed"
-    };
+    println!(
+        "RETURNING RESPONSE status={} psp_ref={:?}",
+        status,
+        psp_ref
+    );
 
-    let webhooks = sqlx::query_as::<_, (Uuid, String, String)>(
-        r#"
-        SELECT id, url, secret
-        FROM webhooks
-        "#,
-    )
-    .fetch_all(&state.db)
-    .await
-    .unwrap_or_default();
-
-    let client = reqwest::Client::builder()
-        .timeout(std::time::Duration::from_secs(5))
-        .build()
-        .unwrap();
-
-    for (webhook_id, url, _secret) in webhooks {
-        let payload_json = serde_json::json!({
-            "event": event_type,
-            "invoice_id": invoice_id,
-        });
-
-        println!("Sending webhook event={} to {}", event_type, url);
-
-        let response = client.post(&url).json(&payload_json).send().await;
-
-        let (delivery_status, response_code) = match response {
-            Ok(resp) => {
-                let code = resp.status().as_u16() as i32;
-
-                if resp.status().is_success() {
-                    ("success", Some(code))
-                } else {
-                    ("failed", Some(code))
-                }
-            }
-
-            Err(_) => ("failed", None),
-        };
-
-        let _ = sqlx::query(
-            r#"
-            INSERT INTO webhook_deliveries (
-                id,
-                webhook_id,
-                event_type,
-                payload,
-                status,
-                response_code
-            )
-            VALUES ($1,$2,$3,$4,$5,$6)
-            "#,
-        )
-        .bind(Uuid::new_v4())
-        .bind(webhook_id)
-        .bind(event_type)
-        .bind(payload_json)
-        .bind(delivery_status)
-        .bind(response_code)
-        .execute(&state.db)
-        .await;
-    }
+    println!("PAY REQUEST END");
+    println!("==============================\n");
 
     Ok(Json(PayInvoiceResponse {
         invoice_id,
